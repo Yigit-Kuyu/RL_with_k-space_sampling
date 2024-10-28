@@ -1,21 +1,19 @@
-import sys
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+from types import SimpleNamespace
 import os
+import sys
 
-'''
-To build activemri from source, run
-(MR_1) (base) yck@yck-HP-Z8-G4-Workstation:~/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition$ pip install -e .
-
-'''
-#import activemri.baselines as mri_baselines
+#import activemri.baselines.ddqn as ddqn
 #import activemri.envs as envs
-#import activemri.envs.envs as mri_envs
-
-# Add the parent directory of environment_yck to the Python path
+#Add the parent directory of environment_yck to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import environment_yck as envs
 import environment_yck.envs as mri_envs
 
-from types import SimpleNamespace  
 
 import argparse
 import torch
@@ -32,7 +30,7 @@ import math
 import torch.optim as optim
 import torch.nn.functional as F
 import functools
-
+import time
 
 
 
@@ -53,7 +51,6 @@ class Policy:
 
     def __call__(self, obs: Dict[str, Any], **kwargs: Any) -> List[int]:
         return self.get_action(obs, **kwargs)
-
 
 
 ###################### Replay Memory ######################
@@ -226,7 +223,6 @@ class replay_buffer:
 
     def __len__(self):
         return len(self.observations)
-
 
 
 ###################### cvpr19_models evaluator network ######################
@@ -420,8 +416,6 @@ class EvaluatorNetwork(nn.Module):
             spectral_map_and_mask_embedding = torch.abs(spectral_map_and_mask_embedding)
         
         return self.model(spectral_map_and_mask_embedding).squeeze(3).squeeze(2)
-
-
 
 
 
@@ -728,72 +722,6 @@ class LowestIndexPolicy(Policy):
         return new_mask
 
 
-class OneStepGreedyOracle(Policy):
-    """A policy that returns the k-space column leading to best reconstruction score.
-
-    Args:
-        env(``activemri.envs.ActiveMRIEnv``): The environment for which the policy is computed
-            for.
-        metric(str): The name of the score metric to use (must be in ``env.score_keys()``).
-        num_samples(optional(int)): If given, only ``num_samples`` random actions will be
-            tested. Defaults to ``None``, which means that method will consider all actions.
-        rng(``numpy.random.RandomState``): A random number generator to use for sampling.
-    """
-
-    def __init__(
-        self,
-        env: mri_envs.ActiveMRIEnv,
-        metric: str,
-        num_samples: Optional[int] = None,
-        rng: Optional[np.random.RandomState] = None,
-    ):
-        assert metric in env.score_keys()
-        super().__init__()
-        self.env = env
-        self.metric = metric
-        self.num_samples = num_samples
-        self.rng = rng if rng is not None else np.random.RandomState()
-
-    def get_action(self, obs: Dict[str, Any], **_kwargs) -> List[int]:
-        """Returns a one-step greedy action maximizing reconstruction score.
-
-        Args:
-            obs(dict(str, any)): As returned by :class:`activemri.envs.ActiveMRIEnv`.
-
-        Returns:
-            list(int): A list of k-space column indices, one per batch element in
-                the observation, equal to the action that maximizes reconstruction score
-                (e.g, SSIM or negative MSE).
-        """
-        mask = obs["mask"]
-        batch_size = mask.shape[0]
-        all_action_lists = []
-        for i in range(batch_size):
-            available_actions = mask[i].logical_not().nonzero().squeeze().tolist()
-            self.rng.shuffle(available_actions)
-            if len(available_actions) < self.num_samples:
-                # Add dummy actions to try if num of samples is higher than the
-                # number of inactive columns in this mask
-                available_actions.extend(
-                    [0] * (self.num_samples - len(available_actions))
-                )
-            all_action_lists.append(available_actions)
-
-        all_scores = np.zeros((batch_size, self.num_samples))
-        for i in range(self.num_samples):
-            batch_action_to_try = [action_list[i] for action_list in all_action_lists]
-            obs, new_score = self.env.try_action(batch_action_to_try)
-            all_scores[:, i] = new_score[self.metric]
-        if self.metric in ["mse", "nmse"]:
-            all_scores *= -1
-        else:
-            assert self.metric in ["ssim", "psnr"]
-
-        best_indices = all_scores.argmax(axis=1)
-        action = []
-        for i in range(batch_size):
-            action.append(all_action_lists[i][best_indices[i]])
-        return action
 
 
 ########################## Action Value Network ##########################
@@ -904,12 +832,6 @@ class EvaluatorBasedValueNetwork(nn.Module):
         return qvalue - 1e10 * mask.squeeze()
 
 
-
-
-
-
-
-
 ###################### Evaluate DDQN ######################
 
 def evaluation(
@@ -974,340 +896,178 @@ def evaluation(
 
 
 
+########################## Test DDQN ##########################
 
-###################### Train DDQN ######################
 
-class DDQNTrainer:
-    """DDQN Trainer for active MRI acquisition.
-
-    Configuration for the trainer is provided by argument ``options``. Must contain the
-    following fields:
-
-        - "checkpoints_dir"(str): The directory where the model will be saved to (or
-          loaded from).
-        - dqn_batch_size(int): The batch size to use for updates.
-        - dqn_burn_in(int): How many steps to do before starting updating parameters.
-        - dqn_normalize(bool): ``True`` if running mean/st. deviation should be maintained
-          for observations.
-        - dqn_only_test(bool): ``True`` if the model will not be trained, thus only will
-          attempt to read from checkpoint and load only weights of the network (ignoring
-          training related information).
-        - dqn_test_episode_freq(optional(int)): How frequently (in number of env steps)
-          to perform test episodes.
-        - freq_dqn_checkpoint_save(int): How often (in episodes) to save the model.
-        - num_train_steps(int): How many environment steps to train for.
-        - replay_buffer_size(int): The capacity of the replay buffer.
-        - resume(bool): If true, will try to load weights from the checkpoints dir.
-        - num_test_episodes(int): How many test episodes to periodically evaluate for.
-        - seed(int): Sets the seed for the environment when running evaluation episodes.
-        - reward_metric(str): Which of the ``env.scores_keys()`` is used as reward. Mainly
-          used for logging purposes.
-        - target_net_update_freq(int): How often (in env's steps) to update the target
-          network.
-
-    Args:
-        options(``argparse.Namespace``): Options for the trainer.
-        env(``activemri.envs.ActiveMRIEnv``): Env for which the policy is trained.
-        device(``torch.device``): Device to use.
-    """
-
+class DDQNTester:
     def __init__(
-        self,
-        options: argparse.Namespace,
-        env: mri_envs.ActiveMRIEnv,
-        device: torch.device,
+        self, env: mri_envs.ActiveMRIEnv, training_dir: str, device: torch.device
     ):
-        self.options = options
         self.env = env
-        self.options.image_width = self.env.kspace_width
-        self.steps = 0
-        self.episode = 0
-        self.best_test_score = -np.inf
         self.device = device
-        self.replay_memory = None
 
-        self.window_size = 1000
-        self.reward_images_in_window = np.zeros(self.window_size)
-        self.current_score_auc_window = np.zeros(self.window_size)
-    
+        self.training_dir = training_dir
+        self.evaluation_dir = os.path.join(training_dir, "evaluation")
+        os.makedirs(self.evaluation_dir, exist_ok=True)
+
+        #self.folder_lock_path = DDQNTrainer.get_lock_filename(training_dir)
+        self.folder_lock_path = '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck/.LOCK'
+
+        #self.latest_policy_path = DDQNTrainer.get_name_latest_checkpoint(self.training_dir
+        self.latest_policy_path = '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck/policy_checkpoint.pth'
+        
+        
+        self.best_test_score = -np.inf
+        self.last_time_stamp = -np.inf
+
+        self.options = None
+
+        # Initialize writer and logger
         '''
-        # ------- Init loggers ------
-        self.writer = tensorboardX.SummaryWriter(
-            os.path.join(self.options.checkpoints_dir)
-        )
+        self.writer = tensorboardX.SummaryWriter(os.path.join(self.evaluation_dir))
         self.logger = logging.getLogger()
-        logging_level = logging.DEBUG if self.options.debug else logging.INFO
-        self.logger.setLevel(logging_level)
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setLevel(logging_level)
+        self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter(
             "%(asctime)s - %(threadName)s - %(levelname)s: %(message)s"
         )
+        ch = logging.StreamHandler(sys.stdout)
         ch.setFormatter(formatter)
         self.logger.addHandler(ch)
-        fh = logging.FileHandler(
-            os.path.join(self.options.checkpoints_dir, "train.log")
-        )
-        fh.setLevel(logging_level)
+        ch.setLevel(logging.DEBUG)
+        fh = logging.FileHandler(os.path.join(self.evaluation_dir, "evaluation.log"))
+        fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
 
-        self.logger.info("Creating DDQN model.")
+        # Read the options used for training
+        options_file_found = False
+        while not options_file_found:
+            options_filename = DDQNTrainer.get_options_filename(self.training_dir)
+            with _get_folder_lock(self.folder_lock_path):
+                if os.path.isfile(options_filename):
+                    self.logger.info(f"Options file found at {options_filename}.")
+                    with open(options_filename, "rb") as f:
+                        self.options = pickle.load(f)
+                    options_file_found = True
+            if not options_file_found:
+                self.logger.info(f"No options file found at {options_filename}.")
+                self.logger.info("I will wait for five minutes before trying again.")
+                time.sleep(300)
+        # This change is needed so that util.test_policy writes results to correct directory
+        self.options.checkpoints_dir = self.evaluation_dir
+        os.makedirs(self.evaluation_dir, exist_ok=True)
 
+        # Initialize environment
+        self.options.image_width = self.env.action_space.n
+        self.logger.info(f"Created environment with {self.env.action_space.n} actions")
+
+        self.logger.info(f"Checkpoint dir for this job is {self.evaluation_dir}")
         self.logger.info(
-            f"Creating replay buffer with capacity {options.mem_capacity}."
+            f"Evaluation will be done for model saved at {self.training_dir}"
         )
         '''
 
-        # ------- Create replay buffer and networks ------
-        # See _encode_obs_dict() for tensor format
-        self.obs_shape = (2, self.env.kspace_height + 2, self.env.kspace_width)
-        self.replay_memory = replay_buffer(
-            options.mem_capacity,
-            self.obs_shape,
-            self.options.dqn_batch_size,
-            self.options.dqn_burn_in,
-            use_normalization=self.options.dqn_normalize,
-        )
-        #self.logger.info("Created replay buffer.")
-        self.policy = DDQN(device, self.replay_memory, self.options)
-        self.target_net = DDQN(device, None, self.options)
-        self.target_net.eval()
-        #self.logger.info(f"Created neural networks with {self.env.action_space.n} outputs.")
+        # Initialize policy
+        self.policy = DDQN(device, None, self.options)
 
-        # ------- Files used to communicate with DDQNTester ------
-        self.folder_lock_path = DDQNTrainer.get_lock_filename(self.options.checkpoints_dir)
-        with _get_folder_lock(self.folder_lock_path):
-            # Write options so that tester can read them
-            with open(
-                DDQNTrainer.get_options_filename(self.options.checkpoints_dir), "wb"
-            ) as f:
-                pickle.dump(self.options, f)
-            # Remove previous done file since training will start over
-            done_file = DDQNTrainer.get_done_filename(self.options.checkpoints_dir)
-            if os.path.isfile(done_file):
-                os.remove(done_file)
-
-    @staticmethod
-    def get_done_filename(path):
-        return os.path.join(path, "DONE")
-
-    @staticmethod
-    def get_name_latest_checkpoint(path):
-        return os.path.join(path, "policy_checkpoint.pth")
-
-    @staticmethod
-    def get_options_filename(path):
-        return os.path.join(path, "options.pickle")
-
-    @staticmethod
-    def get_lock_filename(path):
-        return os.path.join(path, ".LOCK")
-
-    def _max_replay_buffer_size(self):
-        return min(self.options.num_train_steps, self.options.replay_buffer_size)
-
-    def load_checkpoint_if_needed(self):
-        if self.options.dqn_only_test or self.options.resume:
-            policy_path = os.path.join(self.options.dqn_weights_path)
-            if os.path.isfile(policy_path):
-                self.load(policy_path)
-                self.logger.info(f"Loaded DQN policy found at {policy_path}.")
-            else:
-                self.logger.warning(f"No DQN policy found at {policy_path}.")
-                if self.options.dqn_only_test:
-                    raise FileNotFoundError
-
-    def _train_dqn_policy(self):
-        """ Trains the DQN policy. """
-        
-        # self.logger.info(
-        #     f"Starting training at step {self.steps}/{self.options.num_train_steps}. "
-        #     f"Best score so far is {self.best_test_score}."
-        # )
-        print(f"Starting training at step {self.steps}/{self.options.num_train_steps}. Best score so far is {self.best_test_score}.")
-        
-        steps_epsilon = self.steps
-        while self.steps < self.options.num_train_steps: # 1000
-            # self.logger.info("Episode {}".format(self.episode + 1))
-            print("Episode {}".format(self.episode + 1))
-
-            # Evaluate the current policy
-            if self.options.dqn_test_episode_freq and (
-                self.episode % self.options.dqn_test_episode_freq == 0
-            ):
-                test_scores, _ = evaluation.evaluate(
-                    self.env,
-                    self.policy,
-                    self.options.num_test_episodes,
-                    self.options.seed,
-                    "val",
-                )
-                self.env.set_training()
-                auc_score = test_scores[self.options.reward_metric].sum(axis=1).mean()
-                if "mse" in self.options.reward_metric:
-                    auc_score *= -1
-                if auc_score > self.best_test_score:
-                    policy_path = os.path.join(
-                        self.options.checkpoints_dir, "policy_best.pt"
-                    )
-                    self.save(policy_path)
-                    self.best_test_score = auc_score
-                    # self.logger.info(
-                    #     f"Saved DQN model with score {self.best_test_score} to {policy_path}."
-                    # )
-                    print(f"Saved DQN model with score {self.best_test_score} to {policy_path}.")
-
-            # Save model periodically
-            if self.episode % self.options.freq_dqn_checkpoint_save == 0:
-                self.checkpoint(save_memory=False)
-
-            # Run an episode and update model
-            obs, meta = self.env.reset()
-            msg = ", ".join(
-                [
-                    f"({meta['fname'][i]}, {meta['slice_id'][i]})"
-                    for i in range(len(meta["slice_id"]))
-                ]
-            )
-            # self.logger.info(f"Episode started with images {msg}.")
-            print(f"Episode started with images {msg}.")
-            all_done = False
-            total_reward = 0
-            auc_score = 0
-            while not all_done:
-                epsilon = _get_epsilon(steps_epsilon, self.options)
-                action = self.policy.get_action(obs, eps_threshold=epsilon)
-                next_obs, reward, done, meta = self.env.step(action)
-                auc_score += meta["current_score"][self.options.reward_metric]
-                all_done = all(done)
-                self.steps += 1
-                obs_tensor = _encode_obs_dict(obs)
-                next_obs_tensor = _encode_obs_dict(next_obs)
-                batch_size = len(obs_tensor)
-                for i in range(batch_size):
-                    self.policy.add_experience(
-                        obs_tensor[i], action[i], next_obs_tensor[i], reward[i], done[i]
-                    )
-
-                update_results = self.policy.update_parameters(self.target_net)
-                torch.cuda.empty_cache()
-                if self.steps % self.options.target_net_update_freq == 0:
-                    # self.logger.info("Updating target network.")
-                    print("Updating target network.")
-                    self.target_net.load_state_dict(self.policy.state_dict())
-                steps_epsilon += 1
-
-                # Adding per-step tensorboard logs
-                if self.steps % 250 == 0:
-                    # self.logger.debug("Writing to tensorboard.")
-                    print("Writing to tensorboard.")
-                    #self.writer.add_scalar("epsilon", epsilon, self.steps)
-                    print("epsilon:", epsilon)
-                    if update_results is not None:
-                        #self.writer.add_scalar(
-                        #    "loss", update_results["loss"], self.steps
-                        #)
-                        print("loss:", update_results["loss"])
-                        #self.writer.add_scalar(
-                        #    "grad_norm", update_results["grad_norm"], self.steps
-                        #)
-                        print("grad_norm:", update_results["grad_norm"])
-                        #self.writer.add_scalar(
-                        #    "mean_q_value", update_results["q_values_mean"], self.steps
-                        #)
-                        print("mean_q_value:", update_results["q_values_mean"])
-                        #self.writer.add_scalar(
-                        #    "std_q_value", update_results["q_values_std"], self.steps
-                        #)
-                        print("std_q_value:", update_results["q_values_std"])
-
-                total_reward += reward
-                obs = next_obs
-
-            # Adding per-episode tensorboard logs
-            total_reward = total_reward.mean().item()
-            auc_score = auc_score.mean().item()
-            self.reward_images_in_window[self.episode % self.window_size] = total_reward
-            self.current_score_auc_window[self.episode % self.window_size] = auc_score
-            #self.writer.add_scalar("episode_reward", total_reward, self.episode)
-            print("episode_reward:", total_reward)
-            
-            avg_reward = np.sum(self.reward_images_in_window) / min(self.episode + 1, self.window_size)
-            #self.writer.add_scalar(
-            #    "average_reward_images_in_window",
-            #    avg_reward,
-            #    self.episode,
-            #)
-            print("average_reward_images_in_window:", avg_reward)
-            
-            avg_auc = np.sum(self.current_score_auc_window) / min(self.episode + 1, self.window_size)
-            #self.writer.add_scalar(
-            #    "average_auc_score_in_window", 
-            #    avg_auc,
-            #    self.episode,
-            #)
-            print("average_auc_score_in_window:", avg_auc)
-
-            self.episode += 1
-
-        self.checkpoint()
-
-        # Writing DONE file with best test score
-        with _get_folder_lock(self.folder_lock_path):
-            with open(
-                DDQNTrainer.get_done_filename(self.options.checkpoints_dir), "w"
-            ) as f:
-                f.write(str(self.best_test_score))
-
-        return self.best_test_score
+        # Load info about best checkpoint tested and timestamp
+        self.load_tester_checkpoint_if_present()
 
     def __call__(self):
-        self.load_checkpoint_if_needed()
-        return self._train_dqn_policy() #  Train DQN policy
+        training_done = False
+        while not training_done:
+            training_done = self.check_if_train_done()
+            self.logger.info(f"Is training done? {training_done}.")
+            checkpoint_episode, timestamp = self.load_latest_policy()
 
-    def checkpoint(self, save_memory=True):
-        policy_path = DDQNTrainer.get_name_latest_checkpoint(
-            self.options.checkpoints_dir
-        )
-        self.save(policy_path)
-        #self.logger.info(f"Saved DQN checkpoint to {policy_path}")
-        print(f"Saved DQN checkpoint to {policy_path}")
-        if save_memory:
-            #self.logger.info("Now saving replay memory.")
-            print("Now saving replay memory.")
-            memory_path = self.replay_memory.save(
-                self.options.checkpoints_dir, "replay_buffer.pt"
+            if timestamp is None or timestamp <= self.last_time_stamp:
+                # No new policy checkpoint to evaluate
+                self.logger.info(
+                    "No new policy to evaluate. "
+                    "I will wait for 10 minutes before trying again."
+                )
+                time.sleep(600)
+                continue
+
+            self.logger.info(
+                f"Found a new checkpoint with timestamp {timestamp}, "
+                f"I will start evaluation now."
             )
-            #self.logger.info(f"Saved replay buffer to {memory_path}.")
-            print(f"Saved replay buffer to {memory_path}.")
+            test_scores, _ = evaluation.evaluate(
+                self.env,
+                self.policy,
+                self.options.num_test_episodes,
+                self.options.seed,
+                "val",
+                verbose=True,
+            )
+            auc_score = test_scores[self.options.reward_metric].sum(axis=1).mean()
+            if "mse" in self.options.reward_metric:
+                auc_score *= -1
+            self.logger.info(f"The test score for the model was {auc_score}.")
+            self.last_time_stamp = timestamp
+            if auc_score > self.best_test_score:
+                self.save_tester_checkpoint()
+                policy_path = os.path.join(self.evaluation_dir, "policy_best.pt")
+                self.save_policy(policy_path, checkpoint_episode)
+                self.best_test_score = auc_score
+                self.logger.info(
+                    f"Saved DQN model with score {self.best_test_score} to {policy_path}, "
+                    f"corresponding to episode {checkpoint_episode}."
+                )
 
-    def save(self, path):
+    def check_if_train_done(self):
         with _get_folder_lock(self.folder_lock_path):
-            torch.save(
+            #done_file_path = DDQNTrainer.get_done_filename(self.training_dir)
+            done_file_path= '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition/Save_Training_Checkpoints_yck/DONE'
+            return os.path.isfile(done_file_path)
+
+    def checkpoint(self):
+        self.save_tester_checkpoint()
+
+    def save_tester_checkpoint(self):
+        path = os.path.join(self.evaluation_dir, "tester_checkpoint.pickle")
+        with open(path, "wb") as f:
+            pickle.dump(
                 {
-                    "dqn_weights": self.policy.state_dict(),
-                    "target_weights": self.target_net.state_dict(),
-                    "options": self.options,
-                    "episode": self.episode,
-                    "steps": self.steps,
                     "best_test_score": self.best_test_score,
-                    "reward_images_in_window": self.reward_images_in_window,
-                    "current_score_auc_window": self.current_score_auc_window,
+                    "last_time_stamp": self.last_time_stamp,
                 },
-                path,
+                f,
             )
 
-    def load(self, path):
-        checkpoint = torch.load(path)
-        self.policy.load_state_dict(checkpoint["dqn_weights"])
-        self.episode = checkpoint["episode"] + 1
-        if not self.options.dqn_only_test:
-            self.target_net.load_state_dict(checkpoint["target_weights"])
-            self.steps = checkpoint["steps"]
+    def load_tester_checkpoint_if_present(self):
+        path = os.path.join(self.evaluation_dir, "tester_checkpoint.pickle")
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                checkpoint = pickle.load(f)
             self.best_test_score = checkpoint["best_test_score"]
-            self.reward_images_in_window = checkpoint["reward_images_in_window"]
-            self.current_score_auc_window = checkpoint["current_score_auc_window"]
+            self.last_time_stamp = checkpoint["last_time_stamp"]
+            self.logger.info(
+                f"Found checkpoint from previous evaluation run. "
+                f"Best Score set to {self.best_test_score}. "
+                f"Last Time Stamp set to {self.last_time_stamp}"
+            )
+
+    # noinspection PyProtectedMember
+    def load_latest_policy(self):
+        with _get_folder_lock(self.folder_lock_path):
+            if not os.path.isfile(self.latest_policy_path):
+                return None, None
+            timestamp = os.path.getmtime(self.latest_policy_path)
+            checkpoint = torch.load(self.latest_policy_path, map_location=self.device)
+        self.policy.load_state_dict(checkpoint["dqn_weights"])
+        return checkpoint["episode"], timestamp
+
+    def save_policy(self, path, episode):
+        torch.save(
+            {
+                "dqn_weights": self.policy.state_dict(),
+                "episode": episode,
+                "options": self.options,
+            },
+            path,
+        )
 
 
 
@@ -1802,90 +1562,6 @@ def preprocess_inputs(batch, dataroot, device, prev_reconstruction=None):
 
 
 
-###################### k-space Sampling Loss  ######################
-
-class GANLossKspace(nn.Module):
-    def __init__(
-        self,
-        use_lsgan=True,
-        use_mse_as_energy=False,
-        grad_ctx=False,
-        gamma=100,
-        options=None,
-    ):
-        super(GANLossKspace, self).__init__()
-        # self.register_buffer('real_label', torch.ones(imSize, imSize))
-        # self.register_buffer('fake_label', torch.zeros(imSize, imSize))
-        self.grad_ctx = grad_ctx
-        self.options = options
-        if use_lsgan:
-            self.loss = nn.MSELoss(size_average=False)
-        else:
-            self.loss = nn.BCELoss(size_average=False)
-        self.use_mse_as_energy = use_mse_as_energy
-        if use_mse_as_energy:
-            self.gamma = gamma
-            self.bin = 5
-
-    def get_target_tensor(self, input, target_is_real, degree, mask, pred_and_gt=None):
-
-        if target_is_real:
-            target_tensor = torch.ones_like(input)
-            target_tensor[:] = degree
-
-        else:
-            target_tensor = torch.zeros_like(input)
-            if not self.use_mse_as_energy:
-                if degree != 1:
-                    target_tensor[:] = degree
-            else:
-                pred, gt = pred_and_gt
-                if self.options.dataroot == "KNEE_RAW":
-                    gt = center_crop(gt, [368, 320])
-                    pred = center_crop(pred, [368, 320])
-                w = gt.shape[2]
-                ks_gt = fft(gt, normalized=True)
-                ks_input = fft(pred, normalized=True)
-                ks_row_mse = F.mse_loss(ks_input, ks_gt, reduce=False).sum(
-                    1, keepdim=True
-                ).sum(2, keepdim=True).squeeze() / (2 * w)
-                energy = torch.exp(-ks_row_mse * self.gamma)
-
-                target_tensor[:] = energy
-            # force observed part to always
-            for i in range(mask.shape[0]):
-                idx = torch.nonzero(mask[i, 0, 0, :])
-                target_tensor[i, idx] = 1
-        return target_tensor
-
-    def __call__(
-        self, input, target_is_real, mask, degree=1, updateG=False, pred_and_gt=None
-    ):
-        # input [B, imSize]
-        # degree is the realistic degree of output
-        # set updateG to True when training G.
-        target_tensor = self.get_target_tensor(
-            input, target_is_real, degree, mask, pred_and_gt
-        )
-        b, w = target_tensor.shape
-        if updateG and not self.grad_ctx:
-            mask_ = mask.squeeze()
-            # maskout the observed part loss
-            masked_input = torch.where(
-                (1 - mask_).byte(), input, torch.tensor(0.0).to(input.device)
-            )
-            masked_target = torch.where(
-                (1 - mask_).byte(), target_tensor, torch.tensor(0.0).to(input.device)
-            )
-            return self.loss(masked_input, masked_target) / (1 - mask_).sum()
-        else:
-            return self.loss(input, target_tensor) / (b * w)
-
-
-
-
-
-
 
 
 ###################### Helper Functions ######################
@@ -2009,48 +1685,26 @@ class CVPR19Evaluator(Policy):
 
 
 
-
 if __name__ == "__main__":
-    # Default values for the DDQN training script
     args = SimpleNamespace(
         budget=10,
         num_parallel_episodes=4,
-        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-        seed=0,
+        training_dir='/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck',
+        device=None,
         extreme_acc=False,
-        checkpoints_dir="/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition/Save_Training_Checkpoints_yck",
-        mem_capacity=1000,
-        dqn_model_type="evaluator", # Choices: "simple_mlp", "evaluator"
-        reward_metric="ssim", # Choices: "mse", "ssim", "nmse", "psnr"
-        resume=False,
-        mask_embedding_dim=0,
-        dqn_batch_size=2,
-        dqn_burn_in=100,
-        dqn_normalize=False,
-        gamma=0.5,
-        epsilon_start=1.0,
-        epsilon_decay=10000,
-        epsilon_end=0.001,
-        dqn_learning_rate=0.001,
-        num_train_steps=1000,
-        num_test_episodes=2,
-        dqn_only_test=False,
-        dqn_weights_path=None,
-        dqn_test_episode_freq=None,
-        target_net_update_freq=5000,
-        freq_dqn_checkpoint_save=1000,
-        debug=False
+        seed=0
     )
-    
 
 
     env = envs.MICCAI2020Env(
         args.num_parallel_episodes,
         args.budget,
-        obs_includes_padding=args.dqn_model_type == "evaluator",
         extreme=args.extreme_acc,
+        seed=args.seed,
     )
-    env.seed(args.seed)
-    #policy = mri_baselines.DDQNTrainer(args, env, args.device)  # orj
-    policy = DDQNTrainer(args, env, args.device)
-    policy()
+    #tester = ddqn.DDQNTester(env, args.training_dir, args.device)
+    tester = DDQNTester(env, args.training_dir, args.device)
+    tester()
+
+
+
