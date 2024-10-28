@@ -32,6 +32,7 @@ import math
 import torch.optim as optim
 import torch.nn.functional as F
 import functools
+import time
 
 
 
@@ -2018,7 +2019,7 @@ if __name__ == "__main__":
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         seed=0,
         extreme_acc=False,
-        checkpoints_dir="/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition/Save_Training_Checkpoints_yck",
+        checkpoints_dir="/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning//RL_with_k-space_sampling/Save_Training_Checkpoints_yck",
         mem_capacity=1000,
         dqn_model_type="evaluator", # Choices: "simple_mlp", "evaluator"
         reward_metric="ssim", # Choices: "mse", "ssim", "nmse", "psnr"
@@ -2029,10 +2030,10 @@ if __name__ == "__main__":
         dqn_normalize=False,
         gamma=0.5,
         epsilon_start=1.0,
-        epsilon_decay=10000,
+        epsilon_decay=100000,
         epsilon_end=0.001,
         dqn_learning_rate=0.001,
-        num_train_steps=1000,
+        num_train_steps=1000000, #1000
         num_test_episodes=2,
         dqn_only_test=False,
         dqn_weights_path=None,
@@ -2042,7 +2043,7 @@ if __name__ == "__main__":
         debug=False
     )
     
-
+    start_time = time.time()
 
     env = envs.MICCAI2020Env(
         args.num_parallel_episodes,
@@ -2054,3 +2055,5 @@ if __name__ == "__main__":
     #policy = mri_baselines.DDQNTrainer(args, env, args.device)  # orj
     policy = DDQNTrainer(args, env, args.device)
     policy()
+    print('Duration: ', time.time() - start_time)
+    print('Training Completed!')

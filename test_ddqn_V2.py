@@ -938,20 +938,21 @@ class DDQNTester:
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
-
+        '''
         # Read the options used for training
         options_file_found = False
         while not options_file_found:
-            options_filename = DDQNTrainer.get_options_filename(self.training_dir)
+            #options_filename = DDQNTrainer.get_options_filename(self.training_dir)
+            options_filename = '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck/options.pickle'
             with _get_folder_lock(self.folder_lock_path):
                 if os.path.isfile(options_filename):
-                    self.logger.info(f"Options file found at {options_filename}.")
+                    print(f"Options file found at {options_filename}.")
                     with open(options_filename, "rb") as f:
                         self.options = pickle.load(f)
                     options_file_found = True
             if not options_file_found:
-                self.logger.info(f"No options file found at {options_filename}.")
-                self.logger.info("I will wait for five minutes before trying again.")
+                print(f"No options file found at {options_filename}.")
+                print("I will wait for five minutes before trying again.")
                 time.sleep(300)
         # This change is needed so that util.test_policy writes results to correct directory
         self.options.checkpoints_dir = self.evaluation_dir
@@ -959,13 +960,17 @@ class DDQNTester:
 
         # Initialize environment
         self.options.image_width = self.env.action_space.n
-        self.logger.info(f"Created environment with {self.env.action_space.n} actions")
-
-        self.logger.info(f"Checkpoint dir for this job is {self.evaluation_dir}")
-        self.logger.info(
-            f"Evaluation will be done for model saved at {self.training_dir}"
-        )
-        '''
+        
+        # Initial information
+        print(f"Created environment with {self.env.action_space.n} actions")
+        print(f"Checkpoint dir for this job is {self.evaluation_dir}")
+        print(f"Evaluation will be done for model saved at {self.training_dir}")
+        
+        # self.logger.info(f"Created environment with {self.env.action_space.n} actions")
+        # self.logger.info(f"Checkpoint dir for this job is {self.evaluation_dir}")
+        # self.logger.info(
+        #     f"Evaluation will be done for model saved at {self.training_dir}"
+        # )
 
         # Initialize policy
         self.policy = DDQN(device, None, self.options)
@@ -977,23 +982,23 @@ class DDQNTester:
         training_done = False
         while not training_done:
             training_done = self.check_if_train_done()
-            self.logger.info(f"Is training done? {training_done}.")
+            print(f"Is training done? {training_done}")
             checkpoint_episode, timestamp = self.load_latest_policy()
 
             if timestamp is None or timestamp <= self.last_time_stamp:
                 # No new policy checkpoint to evaluate
-                self.logger.info(
+                print(
                     "No new policy to evaluate. "
                     "I will wait for 10 minutes before trying again."
                 )
                 time.sleep(600)
                 continue
 
-            self.logger.info(
+            print(
                 f"Found a new checkpoint with timestamp {timestamp}, "
                 f"I will start evaluation now."
             )
-            test_scores, _ = evaluation.evaluate(
+            test_scores, _ = evaluation(
                 self.env,
                 self.policy,
                 self.options.num_test_episodes,
@@ -1004,14 +1009,14 @@ class DDQNTester:
             auc_score = test_scores[self.options.reward_metric].sum(axis=1).mean()
             if "mse" in self.options.reward_metric:
                 auc_score *= -1
-            self.logger.info(f"The test score for the model was {auc_score}.")
+            print(f"The test score for the model was {auc_score}.")
             self.last_time_stamp = timestamp
             if auc_score > self.best_test_score:
                 self.save_tester_checkpoint()
                 policy_path = os.path.join(self.evaluation_dir, "policy_best.pt")
                 self.save_policy(policy_path, checkpoint_episode)
                 self.best_test_score = auc_score
-                self.logger.info(
+                print(
                     f"Saved DQN model with score {self.best_test_score} to {policy_path}, "
                     f"corresponding to episode {checkpoint_episode}."
                 )
@@ -1019,7 +1024,7 @@ class DDQNTester:
     def check_if_train_done(self):
         with _get_folder_lock(self.folder_lock_path):
             #done_file_path = DDQNTrainer.get_done_filename(self.training_dir)
-            done_file_path= '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition/Save_Training_Checkpoints_yck/DONE'
+            done_file_path= '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck/DONE'
             return os.path.isfile(done_file_path)
 
     def checkpoint(self):
