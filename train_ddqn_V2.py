@@ -2020,7 +2020,7 @@ if __name__ == "__main__":
         seed=0,
         extreme_acc=False,
         checkpoints_dir="/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning//RL_with_k-space_sampling/Save_Training_Checkpoints_yck",
-        mem_capacity=1000,
+        mem_capacity=1000, # 200000
         dqn_model_type="evaluator", # Choices: "simple_mlp", "evaluator"
         reward_metric="ssim", # Choices: "mse", "ssim", "nmse", "psnr"
         resume=False,
