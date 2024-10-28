@@ -2033,7 +2033,7 @@ if __name__ == "__main__":
         epsilon_decay=100000,
         epsilon_end=0.001,
         dqn_learning_rate=0.001,
-        num_train_steps=1000000, #1000
+        num_train_steps=7142, #71428
         num_test_episodes=2,
         dqn_only_test=False,
         dqn_weights_path=None,
@@ -2042,6 +2042,9 @@ if __name__ == "__main__":
         freq_dqn_checkpoint_save=1000,
         debug=False
     )
+
+    # T = 100 - L (L=30), T=70
+    # Number of Episodes= Total Steps / T = 500000 / 70 = 71428
     
     start_time = time.time()
 
