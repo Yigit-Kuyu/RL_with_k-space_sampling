@@ -85,10 +85,24 @@ def import_object_from_str(classname: str, path_num: int):
 def compute_ssim(xs: torch.Tensor, ys: torch.Tensor) -> np.ndarray:
     ssims = []
     for i in range(xs.shape[0]):
+        #ssim = skimage.metrics.structural_similarity(
+        #    xs[i].cpu().numpy(),
+        #    ys[i].cpu().numpy(),
+        #    data_range=ys[i].cpu().numpy().max(),
+        #)
+        
+        if np.iscomplexobj(xs[i]) or np.iscomplexobj(ys[i]): # new added
+            # Convert complex to magnitude
+            xs_real = np.abs(xs[i].cpu().numpy())
+            ys_real = np.abs(ys[i].cpu().numpy())
+        else:
+            xs_real = xs[i].cpu().numpy()
+            ys_real = ys[i].cpu().numpy()
+
         ssim = skimage.metrics.structural_similarity(
-            xs[i].cpu().numpy(),
-            ys[i].cpu().numpy(),
-            data_range=ys[i].cpu().numpy().max(),
+            xs_real,
+            ys_real,
+            data_range=ys_real.max(),
         )
         ssims.append(ssim)
     return np.array(ssims, dtype=np.float32)
@@ -97,11 +111,20 @@ def compute_ssim(xs: torch.Tensor, ys: torch.Tensor) -> np.ndarray:
 def compute_psnr(xs: torch.Tensor, ys: torch.Tensor) -> np.ndarray:
     psnrs = []
     for i in range(xs.shape[0]):
-        psnr = skimage.metrics.peak_signal_noise_ratio(
-            xs[i].cpu().numpy(),
-            ys[i].cpu().numpy(),
-            data_range=ys[i].cpu().numpy().max(),
-        )
+        #psnr = skimage.metrics.peak_signal_noise_ratio(
+        #    xs[i].cpu().numpy(),
+        #    ys[i].cpu().numpy(),
+        #    data_range=ys[i].cpu().numpy().max(),
+        #)
+        
+        if np.iscomplexobj(xs[i]) or np.iscomplexobj(ys[i]): # new added
+            xs_real = np.abs(xs[i].cpu().numpy())
+            ys_real = np.abs(ys[i].cpu().numpy())
+        else:
+            xs_real = xs[i].cpu().numpy()
+            ys_real = ys[i].cpu().numpy()
+
+        psnr = skimage.metrics.peak_signal_noise_ratio(xs_real, ys_real, data_range=ys_real.max())
         psnrs.append(psnr)
     return np.array(psnrs, dtype=np.float32)
 

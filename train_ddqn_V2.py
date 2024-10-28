@@ -415,6 +415,10 @@ class EvaluatorNetwork(nn.Module):
         spectral_map_and_mask_embedding = self.spectral_map(
             input_tensor, mask_embedding, mask
         )
+        # Convert complex tensor to real tensor by taking magnitude
+        if torch.is_complex(spectral_map_and_mask_embedding): # new added
+            spectral_map_and_mask_embedding = torch.abs(spectral_map_and_mask_embedding)
+        
         return self.model(spectral_map_and_mask_embedding).squeeze(3).squeeze(2)
 
 
@@ -1198,20 +1202,25 @@ class DDQNTrainer:
                 if self.steps % 250 == 0:
                     # self.logger.debug("Writing to tensorboard.")
                     print("Writing to tensorboard.")
-                    self.writer.add_scalar("epsilon", epsilon, self.steps)
+                    #self.writer.add_scalar("epsilon", epsilon, self.steps)
+                    print("epsilon:", epsilon)
                     if update_results is not None:
-                        self.writer.add_scalar(
-                            "loss", update_results["loss"], self.steps
-                        )
-                        self.writer.add_scalar(
-                            "grad_norm", update_results["grad_norm"], self.steps
-                        )
-                        self.writer.add_scalar(
-                            "mean_q_value", update_results["q_values_mean"], self.steps
-                        )
-                        self.writer.add_scalar(
-                            "std_q_value", update_results["q_values_std"], self.steps
-                        )
+                        #self.writer.add_scalar(
+                        #    "loss", update_results["loss"], self.steps
+                        #)
+                        print("loss:", update_results["loss"])
+                        #self.writer.add_scalar(
+                        #    "grad_norm", update_results["grad_norm"], self.steps
+                        #)
+                        print("grad_norm:", update_results["grad_norm"])
+                        #self.writer.add_scalar(
+                        #    "mean_q_value", update_results["q_values_mean"], self.steps
+                        #)
+                        print("mean_q_value:", update_results["q_values_mean"])
+                        #self.writer.add_scalar(
+                        #    "std_q_value", update_results["q_values_std"], self.steps
+                        #)
+                        print("std_q_value:", update_results["q_values_std"])
 
                 total_reward += reward
                 obs = next_obs
@@ -1221,19 +1230,24 @@ class DDQNTrainer:
             auc_score = auc_score.mean().item()
             self.reward_images_in_window[self.episode % self.window_size] = total_reward
             self.current_score_auc_window[self.episode % self.window_size] = auc_score
-            self.writer.add_scalar("episode_reward", total_reward, self.episode)
-            self.writer.add_scalar(
-                "average_reward_images_in_window",
-                np.sum(self.reward_images_in_window)
-                / min(self.episode + 1, self.window_size),
-                self.episode,
-            )
-            self.writer.add_scalar(
-                "average_auc_score_in_window",
-                np.sum(self.current_score_auc_window)
-                / min(self.episode + 1, self.window_size),
-                self.episode,
-            )
+            #self.writer.add_scalar("episode_reward", total_reward, self.episode)
+            print("episode_reward:", total_reward)
+            
+            avg_reward = np.sum(self.reward_images_in_window) / min(self.episode + 1, self.window_size)
+            #self.writer.add_scalar(
+            #    "average_reward_images_in_window",
+            #    avg_reward,
+            #    self.episode,
+            #)
+            print("average_reward_images_in_window:", avg_reward)
+            
+            avg_auc = np.sum(self.current_score_auc_window) / min(self.episode + 1, self.window_size)
+            #self.writer.add_scalar(
+            #    "average_auc_score_in_window", 
+            #    avg_auc,
+            #    self.episode,
+            #)
+            print("average_auc_score_in_window:", avg_auc)
 
             self.episode += 1
 
@@ -1687,7 +1701,8 @@ def fftshift(x, dim=None):
 
 def ifft(x, normalized=False, ifft_shift=False):
     x = x.permute(0, 2, 3, 1)
-    y = torch.ifft(x, 2, normalized=normalized)
+    #y = torch.ifft(x, 2, normalized=normalized)
+    y = torch.fft.ifftn(x, dim=(1, 2), norm='backward' if not normalized else 'ortho') # new added
     if ifft_shift:
         y = ifftshift(y, dim=(1, 2))
     return y.permute(0, 3, 1, 2)
@@ -1704,7 +1719,9 @@ def fft(x, normalized=False, shift=False):
     x = x.permute(0, 2, 3, 1)
     if shift:
         x = fftshift(x, dim=(1, 2))
-    y = torch.fft(x, 2, normalized=normalized)
+    #y = torch.fft(x, 2, normalized=normalized)
+    y = torch.fft.fftn(x, dim=(1, 2), norm='backward' if not normalized else 'ortho') # new added
+    
     return y.permute(0, 3, 1, 2)
 
 
