@@ -1707,7 +1707,7 @@ if __name__ == "__main__":
         extreme=args.extreme_acc,
         seed=args.seed,
     )
-    #tester = ddqn.DDQNTester(env, args.training_dir, args.device)
+    
     tester = DDQNTester(env, args.training_dir, args.device)
     tester()
 

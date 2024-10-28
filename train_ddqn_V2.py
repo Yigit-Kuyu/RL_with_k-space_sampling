@@ -2055,7 +2055,6 @@ if __name__ == "__main__":
         extreme=args.extreme_acc,
     )
     env.seed(args.seed)
-    #policy = mri_baselines.DDQNTrainer(args, env, args.device)  # orj
     policy = DDQNTrainer(args, env, args.device)
     policy()
     print('Duration: ', time.time() - start_time)
