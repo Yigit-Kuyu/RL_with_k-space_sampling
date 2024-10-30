@@ -1,14 +1,6 @@
 import sys
 import os
 
-'''
-To build activemri from source, run
-(MR_1) (base) yck@yck-HP-Z8-G4-Workstation:~/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition$ pip install -e .
-
-'''
-#import activemri.baselines as mri_baselines
-#import activemri.envs as envs
-#import activemri.envs.envs as mri_envs
 
 # Add the parent directory of environment_yck to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,23 +28,47 @@ import time
 
 
 
-
 ###################### Interface Classs for Policy ######################
 
 import abc
+
+# Policy class serves as an abstract base class defining the interface for all policy implementations
+# It provides a standard way to get actions from observations across different policy types
 class Policy:
     """ A basic policy interface. """
 
     def __init__(self, *args, **kwargs):
+        """
+        Constructor that initializes a new policy
+        Args:
+            *args: Variable length argument list
+            **kwargs: Arbitrary keyword arguments
+        """
         pass
 
-
-    @abc.abstractmethod
+    @abc.abstractmethod 
     def get_action(self, obs: Dict[str, Any], **kwargs: Any) -> List[int]:
-        """ Returns a list of actions for a batch of observations. """
+        """ 
+        Abstract method that must be implemented by subclasses
+        Takes observations and returns actions
+        Args:
+            obs: Dictionary containing observation data
+            **kwargs: Additional arguments
+        Returns:
+            List of integer actions
+        """
         pass
 
     def __call__(self, obs: Dict[str, Any], **kwargs: Any) -> List[int]:
+        """
+        Makes the policy callable like a function
+        Delegates to get_action() for the actual implementation
+        Args:
+            obs: Dictionary containing observation data
+            **kwargs: Additional arguments
+        Returns:
+            List of integer actions from get_action()
+        """
         return self.get_action(obs, **kwargs)
 
 
@@ -73,6 +89,7 @@ class replay_buffer:
         use_normalization(bool): If ``True``, the replay buffer will keep running mean
                 and standard deviation for the observations. Defaults to ``False``.
     """
+    # Role: Main class for storing and managing experience replay memory for DQN training
 
     def __init__(
         self,
@@ -82,6 +99,7 @@ class replay_buffer:
         burn_in: int,
         use_normalization: bool = False,
     ):
+        # Role: Initialize replay buffer with specified capacity and parameters
         assert burn_in >= batch_size
         self.batch_size = batch_size
         self.burn_in = burn_in
@@ -102,16 +120,19 @@ class replay_buffer:
             self._denormalize = lambda x: x  # type: ignore
 
     def _normalize(self, observation: torch.Tensor) -> Optional[torch.Tensor]:
+        # Role: Normalize observations using running mean and standard deviation
         if observation is None:
             return None
         return (observation - self.mean_obs) / self.std_obs
 
     def _denormalize(self, observation: torch.Tensor) -> Optional[torch.Tensor]:
+        # Role: Denormalize observations back to original scale
         if observation is None:
             return None
         return self.std_obs * observation + self.mean_obs
 
     def _update_stats(self, observation: torch.Tensor):
+        # Role: Update running statistics (mean, std) for observation normalization
         self.count_seen += 1
         delta = observation - self.mean_obs
         self.mean_obs = self.mean_obs + delta / self.count_seen
@@ -127,7 +148,7 @@ class replay_buffer:
         reward: float,
         done: bool,
     ):
-        """ Pushes a transition into the replay buffer. """
+        # Role: Add a new transition to the replay buffer
         self.observations[self.position] = observation.clone()
         self.actions[self.position] = torch.tensor([action], dtype=torch.long)
         self.next_observations[self.position] = next_observation.clone()
@@ -138,14 +159,7 @@ class replay_buffer:
         self.position = (self.position + 1) % len(self)
 
     def sample(self) -> Optional[Dict[str, Optional[torch.Tensor]]]:
-        """Samples a batch of transitions from the replay buffer.
-
-
-        Returns:
-            Dictionary(str, torch.Tensor): Contains keys for "observations",
-            "next_observations", "actions", "rewards", "dones". If the number of entries
-            in the buffer is less than ``self.burn_in``, then returns ``None`` instead.
-        """
+        # Role: Sample a random batch of transitions for training
         if self.count_seen - 1 < self.burn_in:
             return None
         indices = np.random.choice(min(self.count_seen - 1, len(self)), self.batch_size)
@@ -158,7 +172,7 @@ class replay_buffer:
         }
 
     def save(self, directory: str, name: str):
-        """ Saves all tensors and normalization info to file `directory/name` """
+        # Role: Save replay buffer state to disk
         data = {
             "observations": self.observations,
             "actions": self.actions,
@@ -186,13 +200,7 @@ class replay_buffer:
             return full_path
 
     def load(self, path: str, capacity: Optional[int] = None):
-        """Loads the replay buffer from the specified path.
-
-        Args:
-            path(str): The path from where the memory will be loaded from.
-            capacity(int): If provided, the buffer is created with this much capacity. This
-                    value must be larger than the length of the stored tensors.
-        """
+        # Role: Load replay buffer state from disk
         data = torch.load(path)
         self.position = data["position"]
         self.mean_obs = data["mean_obs"]
@@ -226,6 +234,7 @@ class replay_buffer:
         return old_len
 
     def __len__(self):
+        # Role: Return the capacity of the replay buffer
         return len(self.observations)
 
 
@@ -233,21 +242,25 @@ class replay_buffer:
 ###################### cvpr19_models evaluator network ######################
 
 class SimpleSequential(nn.Module):
+    """Role: A simple sequential model that combines two networks in sequence"""
     def __init__(self, net1, net2):
         super(SimpleSequential, self).__init__()
         self.net1 = net1
         self.net2 = net2
 
     def forward(self, x, mask):
+        """Role: Forward pass that applies net1 followed by net2"""
         output = self.net1(x, mask)
         return self.net2(output, mask)
 
 
 class SpectralMapDecomposition(nn.Module):
+    """Role: Decomposes reconstructed images into spectral maps in k-space"""
     def __init__(self):
         super(SpectralMapDecomposition, self).__init__()
 
     def forward(self, reconstructed_image, mask_embedding, mask):
+        """Role: Transforms images to k-space, separates into spectral maps, and combines with mask information"""
         batch_size = reconstructed_image.shape[0]
         height = reconstructed_image.shape[2]
         width = reconstructed_image.shape[3]
@@ -294,22 +307,7 @@ class SpectralMapDecomposition(nn.Module):
 
 
 class EvaluatorNetwork(nn.Module):
-    """Evaluator network used in Zhang et al., CVPR'19.
-
-    Args:
-        number_of_filters(int): Number of filters used in convolutions. Defaults to 256. \n
-        number_of_conv_layers(int): Depth of the model defined as a number of
-                convolutional layers. Defaults to 4.
-        use_sigmoid(bool): Whether the sigmoid non-linearity is applied to the
-                output of the network. Defaults to False.
-        width(int): The width of the image. Defaults to 128 (corresponds to DICOM).
-        height(Optional[int]): The height of the image. If ``None`` the value of ``width``.
-            is used. Defaults to ``None``.
-        mask_embed_dim(int): Dimensionality of the mask embedding.
-        num_output_channels(Optional[int]): The dimensionality of the output. If ``None``,
-            the value of ``width`` is used. Defaults to ``None``.
-    """
-
+    """Role: Neural network that evaluates k-space columns based on reconstructed images"""
     def __init__(
         self,
         number_of_filters: int = 256,
@@ -320,6 +318,7 @@ class EvaluatorNetwork(nn.Module):
         mask_embed_dim: int = 6,
         num_output_channels: Optional[int] = None,
     ):
+        """Role: Initializes network architecture with specified parameters"""
         print(f"[EvaluatorNetwork] -> n_layers = {number_of_conv_layers}")
         super(EvaluatorNetwork, self).__init__()
 
@@ -401,18 +400,7 @@ class EvaluatorNetwork(nn.Module):
         mask_embedding: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
     ):
-        """Computes scores for each k-space column.
-
-        Args:
-            input_tensor(torch.Tensor): Batch of reconstructed images,
-                    as produced by :class:`models.reconstruction.ReconstructorNetwork`.
-            mask_embedding(Optional[torch.Tensor]): Corresponding batch of mask embeddings
-                    produced by :class:`models.reconstruction.ReconstructorNetwork`, if needed.
-            mask(Optional[torch.Tensor]): Corresponding masks arrays, if needed.
-
-        Returns:
-            torch.Tensor: Evaluator score for each k-space column in each image in the batch.
-        """
+        """Role: Computes scores for each k-space column using spectral maps and mask information"""
         spectral_map_and_mask_embedding = self.spectral_map(
             input_tensor, mask_embedding, mask
         )
@@ -450,6 +438,7 @@ class DDQN(nn.Module, Policy):
             from. Can be ``None``, for example, if this is a target network.
         opts(``argparse.Namespace``): Options for the algorithm as explained above.
     """
+    # Role: Main class implementing Double DQN algorithm, combining neural network and policy functionality
 
     def __init__(
         self,
@@ -457,6 +446,7 @@ class DDQN(nn.Module, Policy):
         memory: Optional[replay_buffer],
         opts: argparse.Namespace,
     ):
+        # Role: Initialize DDQN model with device, memory buffer and options
         super().__init__()
         self.model = _get_model(opts)
         self.memory = memory
@@ -474,9 +464,11 @@ class DDQN(nn.Module, Policy):
         reward: float,
         done: bool,
     ):
+        # Role: Add a transition (experience) to the replay memory
         self.memory.push(observation, action, next_observation, reward, done)
 
     def update_parameters(self, target_net: nn.Module) -> Optional[Dict[str, Any]]:
+        # Role: Update network parameters using double Q-learning update rule
         self.model.train()
         batch = self.memory.sample()
         if batch is None:
@@ -538,6 +530,7 @@ class DDQN(nn.Module, Policy):
         }
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Role: Forward pass through the network to predict Q-values
         """Predicts action values.
 
         Args:
@@ -555,6 +548,7 @@ class DDQN(nn.Module, Policy):
     def get_action(  # type: ignore
         self, obs: Dict[str, Any], eps_threshold: float = 0.0
     ) -> List[int]:
+        # Role: Select actions using epsilon-greedy policy based on Q-values
         """Returns an action sampled from an epsilon-greedy policy.
 
         With probability epsilon sample a random k-space column (ignoring active columns),
@@ -577,6 +571,7 @@ class DDQN(nn.Module, Policy):
 
 
 def _get_folder_lock(path):
+    # Role: Create a file lock for thread-safe folder access
     return filelock.FileLock(path, timeout=-1)
 
 
@@ -594,14 +589,17 @@ class RandomPolicy(Policy):
         seed(optional(int)): The seed to use for the random number generator, which is
             based on ``torch.Generator()``.
     """
+    # Role: Implements a policy that randomly selects k-space columns
 
     def __init__(self, seed: Optional[int] = None):
+        # Role: Initialize random policy with optional random seed
         super().__init__()
         self.rng = torch.Generator()
         if seed:
             self.rng.manual_seed(seed)
 
     def get_action(self, obs: Dict[str, Any], **_kwargs) -> List[int]:
+        # Role: Select random k-space columns that haven't been sampled yet
         """Returns a random action without replacement.
 
         Args:
@@ -621,15 +619,18 @@ class RandomPolicy(Policy):
 
 
 class RandomLowBiasPolicy(Policy):
+    # Role: Implements a policy that randomly samples k-space with bias towards low frequencies
     def __init__(
         self, acceleration: float, centered: bool = True, seed: Optional[int] = None
     ):
+        # Role: Initialize policy with acceleration factor and centering options
         super().__init__()
         self.acceleration = acceleration
         self.centered = centered
         self.rng = np.random.RandomState(seed)
 
     def get_action(self, obs: Dict[str, Any], **_kwargs) -> List[int]:
+        # Role: Select k-space columns with bias towards low frequencies
         mask = obs["mask"].squeeze().cpu().numpy()
         new_mask = self._cartesian_mask(mask)
         action = (new_mask - mask).argmax(axis=1)
@@ -637,9 +638,11 @@ class RandomLowBiasPolicy(Policy):
 
     @staticmethod
     def _normal_pdf(length: int, sensitivity: float):
+        # Role: Generate normal probability distribution for sampling bias
         return np.exp(-sensitivity * (np.arange(length) - length / 2) ** 2)
 
     def _cartesian_mask(self, current_mask: np.ndarray) -> np.ndarray:
+        # Role: Create sampling mask with probability distribution favoring low frequencies
         batch_size, image_width = current_mask.shape
         pdf_x = RandomLowBiasPolicy._normal_pdf(
             image_width, 0.5 / (image_width / 10.0) ** 2
@@ -669,6 +672,7 @@ class RandomLowBiasPolicy(Policy):
 
 
 class LowestIndexPolicy(Policy):
+    # Role: Implements a policy that systematically samples k-space from low to high frequencies
     """A policy that represents low-to-high frequency k-space selection.
 
     Args:
@@ -686,12 +690,14 @@ class LowestIndexPolicy(Policy):
         alternate_sides: bool,
         centered: bool = True,
     ):
+        # Role: Initialize policy with options for sampling pattern
         super().__init__()
         self.alternate_sides = alternate_sides
         self.centered = centered
         self.bottom_side = True
 
     def get_action(self, obs: Dict[str, Any], **_kwargs) -> List[int]:
+        # Role: Select k-space columns systematically from low to high frequencies
         """Returns a random action without replacement.
 
         Args:
@@ -708,6 +714,7 @@ class LowestIndexPolicy(Policy):
         return action.tolist()
 
     def _get_new_mask(self, current_mask: np.ndarray) -> np.ndarray:
+        # Role: Create new mask by selecting next unsampled column based on frequency ordering
         # The code below assumes mask in non centered
         new_mask = (
             np.fft.ifftshift(current_mask, axes=1)
@@ -730,6 +737,7 @@ class LowestIndexPolicy(Policy):
 
 
 class OneStepGreedyOracle(Policy):
+    # Role: Implements a greedy policy that selects k-space columns maximizing immediate reconstruction quality
     """A policy that returns the k-space column leading to best reconstruction score.
 
     Args:
@@ -748,6 +756,7 @@ class OneStepGreedyOracle(Policy):
         num_samples: Optional[int] = None,
         rng: Optional[np.random.RandomState] = None,
     ):
+        # Role: Initialize oracle with environment and evaluation metric
         assert metric in env.score_keys()
         super().__init__()
         self.env = env
@@ -756,6 +765,7 @@ class OneStepGreedyOracle(Policy):
         self.rng = rng if rng is not None else np.random.RandomState()
 
     def get_action(self, obs: Dict[str, Any], **_kwargs) -> List[int]:
+        # Role: Select k-space columns that maximize immediate reconstruction quality
         """Returns a one-step greedy action maximizing reconstruction score.
 
         Args:
@@ -800,7 +810,7 @@ class OneStepGreedyOracle(Policy):
 ########################## Action Value Network ##########################
 
 class SimpleMLP(nn.Module):
-    """ Value network used for dataset specific DDQN model. """
+    """Role: A simple multi-layer perceptron network for predicting Q-values in DDQN"""
 
     def __init__(
         self,
@@ -810,6 +820,7 @@ class SimpleMLP(nn.Module):
         hidden_size: int = 32,
         ignore_mask: bool = True,
     ):
+        # Role: Initialize the MLP network with configurable layers and parameters
         super().__init__()
         self.ignore_mask = ignore_mask
         self.num_inputs = budget if self.ignore_mask else image_width
@@ -825,20 +836,7 @@ class SimpleMLP(nn.Module):
         self.model = nn.Sequential(self.linear1, self.hidden, self.output)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        """Predicts action values.
-
-        Args:
-            obs(torch.Tensor): The observation tensor. Once decoded, it only uses the mask
-                               information. If ``__init__(..., ignore_mask=True)``, it will
-                               additionally use the mask only to deduce the time step.
-
-        Returns:
-            torch.Tensor: Q-values for all actions at the given observation.
-
-        Note:
-            Values corresponding to active k-space columns in the observation are manually
-            set to ``1e-10``.
-        """
+        """Role: Forward pass through the network to predict Q-values for each action"""
         _, mask, _ = _decode_obs_tensor(obs, 0)
         previous_actions = mask.squeeze()
 
@@ -863,11 +861,12 @@ class SimpleMLP(nn.Module):
 ########################## Action Value Network ##########################
 
 class EvaluatorBasedValueNetwork(nn.Module):
-    """ Value network based on Zhang et al., CVPR'19 evaluator architecture. """
+    """ Role: Neural network that uses the CVPR'19 evaluator architecture to estimate Q-values for k-space column selection """
 
     def __init__(
         self, image_width: int, mask_embed_dim: int, legacy_offset: Optional[int] = None
     ):
+        # Role: Initialize the evaluator network with specified image width, mask embedding dimension and optional legacy offset
         super().__init__()
         num_actions = image_width
         if legacy_offset:
@@ -895,6 +894,8 @@ class EvaluatorBasedValueNetwork(nn.Module):
         Note:
             Values corresponding to active k-space columns in the observation are manually
             set to ``1e-10``.
+            
+        Role: Forward pass through network to predict Q-values for each possible k-space column selection
         """
         reconstruction, mask, mask_embedding = _decode_obs_tensor(
             obs, self.evaluator.mask_embed_dim
@@ -903,11 +904,6 @@ class EvaluatorBasedValueNetwork(nn.Module):
         if self.legacy_offset:
             mask = mask[..., self.legacy_offset : -self.legacy_offset]
         return qvalue - 1e10 * mask.squeeze()
-
-
-
-
-
 
 
 
@@ -921,6 +917,16 @@ def evaluation(
     split: str,
     verbose: Optional[bool] = False,
 ) -> Tuple[Dict[str, np.ndarray], List[Tuple[Any, Any]]]:
+    """
+    Role: Evaluates a policy on the environment for a specified number of episodes and returns performance metrics
+    
+    This function:
+    - Sets up the environment with the given seed and split (test/val)
+    - Runs the policy for the specified number of episodes
+    - Collects scores at each step
+    - Tracks image IDs and trajectories
+    - Returns collected scores and image IDs
+    """
     env.seed(seed)
     if split == "test":
         env.set_test()
@@ -975,7 +981,6 @@ def evaluation(
 
 
 
-
 ###################### Train DDQN ######################
 
 class DDQNTrainer:
@@ -1011,6 +1016,7 @@ class DDQNTrainer:
         env(``activemri.envs.ActiveMRIEnv``): Env for which the policy is trained.
         device(``torch.device``): Device to use.
     """
+    # Role: Main class for training a Double DQN agent for active MRI acquisition
 
     def __init__(
         self,
@@ -1018,6 +1024,7 @@ class DDQNTrainer:
         env: mri_envs.ActiveMRIEnv,
         device: torch.device,
     ):
+        # Role: Initialize trainer with options, environment and device settings
         self.options = options
         self.env = env
         self.options.image_width = self.env.kspace_width
@@ -1030,35 +1037,6 @@ class DDQNTrainer:
         self.window_size = 1000
         self.reward_images_in_window = np.zeros(self.window_size)
         self.current_score_auc_window = np.zeros(self.window_size)
-    
-        '''
-        # ------- Init loggers ------
-        self.writer = tensorboardX.SummaryWriter(
-            os.path.join(self.options.checkpoints_dir)
-        )
-        self.logger = logging.getLogger()
-        logging_level = logging.DEBUG if self.options.debug else logging.INFO
-        self.logger.setLevel(logging_level)
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setLevel(logging_level)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(threadName)s - %(levelname)s: %(message)s"
-        )
-        ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
-        fh = logging.FileHandler(
-            os.path.join(self.options.checkpoints_dir, "train.log")
-        )
-        fh.setLevel(logging_level)
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
-
-        self.logger.info("Creating DDQN model.")
-
-        self.logger.info(
-            f"Creating replay buffer with capacity {options.mem_capacity}."
-        )
-        '''
 
         # ------- Create replay buffer and networks ------
         # See _encode_obs_dict() for tensor format
@@ -1070,12 +1048,11 @@ class DDQNTrainer:
             self.options.dqn_burn_in,
             use_normalization=self.options.dqn_normalize,
         )
-        #self.logger.info("Created replay buffer.")
+        print("Created replay buffer.")
         self.policy = DDQN(device, self.replay_memory, self.options)
         self.target_net = DDQN(device, None, self.options)
         self.target_net.eval()
-        #self.logger.info(f"Created neural networks with {self.env.action_space.n} outputs.")
-
+       
         # ------- Files used to communicate with DDQNTester ------
         self.folder_lock_path = DDQNTrainer.get_lock_filename(self.options.checkpoints_dir)
         with _get_folder_lock(self.folder_lock_path):
@@ -1091,24 +1068,30 @@ class DDQNTrainer:
 
     @staticmethod
     def get_done_filename(path):
+        # Role: Get path for file indicating training completion
         return os.path.join(path, "DONE")
 
     @staticmethod
     def get_name_latest_checkpoint(path):
+        # Role: Get path for latest model checkpoint file
         return os.path.join(path, "policy_checkpoint.pth")
 
     @staticmethod
     def get_options_filename(path):
+        # Role: Get path for options configuration file
         return os.path.join(path, "options.pickle")
 
     @staticmethod
     def get_lock_filename(path):
+        # Role: Get path for file lock to prevent concurrent access
         return os.path.join(path, ".LOCK")
 
     def _max_replay_buffer_size(self):
+        # Role: Calculate maximum size for replay buffer
         return min(self.options.num_train_steps, self.options.replay_buffer_size)
 
     def load_checkpoint_if_needed(self):
+        # Role: Load model checkpoint if testing or resuming training
         if self.options.dqn_only_test or self.options.resume:
             policy_path = os.path.join(self.options.dqn_weights_path)
             if os.path.isfile(policy_path):
@@ -1120,17 +1103,12 @@ class DDQNTrainer:
                     raise FileNotFoundError
 
     def _train_dqn_policy(self):
-        """ Trains the DQN policy. """
+        # Role: Main training loop for DQN policy
         
-        # self.logger.info(
-        #     f"Starting training at step {self.steps}/{self.options.num_train_steps}. "
-        #     f"Best score so far is {self.best_test_score}."
-        # )
         print(f"Starting training at step {self.steps}/{self.options.num_train_steps}. Best score so far is {self.best_test_score}.")
         
         steps_epsilon = self.steps
-        while self.steps < self.options.num_train_steps: # 1000
-            # self.logger.info("Episode {}".format(self.episode + 1))
+        while self.steps < self.options.num_train_steps: # original:1000
             print("Episode {}".format(self.episode + 1))
 
             # Evaluate the current policy
@@ -1154,9 +1132,6 @@ class DDQNTrainer:
                     )
                     self.save(policy_path)
                     self.best_test_score = auc_score
-                    # self.logger.info(
-                    #     f"Saved DQN model with score {self.best_test_score} to {policy_path}."
-                    # )
                     print(f"Saved DQN model with score {self.best_test_score} to {policy_path}.")
 
             # Save model periodically
@@ -1171,7 +1146,6 @@ class DDQNTrainer:
                     for i in range(len(meta["slice_id"]))
                 ]
             )
-            # self.logger.info(f"Episode started with images {msg}.")
             print(f"Episode started with images {msg}.")
             all_done = False
             total_reward = 0
@@ -1194,33 +1168,18 @@ class DDQNTrainer:
                 update_results = self.policy.update_parameters(self.target_net)
                 torch.cuda.empty_cache()
                 if self.steps % self.options.target_net_update_freq == 0:
-                    # self.logger.info("Updating target network.")
+                    
                     print("Updating target network.")
                     self.target_net.load_state_dict(self.policy.state_dict())
                 steps_epsilon += 1
 
-                # Adding per-step tensorboard logs
                 if self.steps % 250 == 0:
-                    # self.logger.debug("Writing to tensorboard.")
-                    print("Writing to tensorboard.")
-                    #self.writer.add_scalar("epsilon", epsilon, self.steps)
+                
                     print("epsilon:", epsilon)
                     if update_results is not None:
-                        #self.writer.add_scalar(
-                        #    "loss", update_results["loss"], self.steps
-                        #)
                         print("loss:", update_results["loss"])
-                        #self.writer.add_scalar(
-                        #    "grad_norm", update_results["grad_norm"], self.steps
-                        #)
                         print("grad_norm:", update_results["grad_norm"])
-                        #self.writer.add_scalar(
-                        #    "mean_q_value", update_results["q_values_mean"], self.steps
-                        #)
                         print("mean_q_value:", update_results["q_values_mean"])
-                        #self.writer.add_scalar(
-                        #    "std_q_value", update_results["q_values_std"], self.steps
-                        #)
                         print("std_q_value:", update_results["q_values_std"])
 
                 total_reward += reward
@@ -1231,23 +1190,12 @@ class DDQNTrainer:
             auc_score = auc_score.mean().item()
             self.reward_images_in_window[self.episode % self.window_size] = total_reward
             self.current_score_auc_window[self.episode % self.window_size] = auc_score
-            #self.writer.add_scalar("episode_reward", total_reward, self.episode)
             print("episode_reward:", total_reward)
             
             avg_reward = np.sum(self.reward_images_in_window) / min(self.episode + 1, self.window_size)
-            #self.writer.add_scalar(
-            #    "average_reward_images_in_window",
-            #    avg_reward,
-            #    self.episode,
-            #)
             print("average_reward_images_in_window:", avg_reward)
             
             avg_auc = np.sum(self.current_score_auc_window) / min(self.episode + 1, self.window_size)
-            #self.writer.add_scalar(
-            #    "average_auc_score_in_window", 
-            #    avg_auc,
-            #    self.episode,
-            #)
             print("average_auc_score_in_window:", avg_auc)
 
             self.episode += 1
@@ -1264,26 +1212,26 @@ class DDQNTrainer:
         return self.best_test_score
 
     def __call__(self):
+        # Role: Main entry point for training - loads checkpoint if needed and starts training
         self.load_checkpoint_if_needed()
         return self._train_dqn_policy() #  Train DQN policy
 
     def checkpoint(self, save_memory=True):
+        # Role: Save model checkpoint and optionally save replay memory
         policy_path = DDQNTrainer.get_name_latest_checkpoint(
             self.options.checkpoints_dir
         )
         self.save(policy_path)
-        #self.logger.info(f"Saved DQN checkpoint to {policy_path}")
         print(f"Saved DQN checkpoint to {policy_path}")
-        if save_memory:
-            #self.logger.info("Now saving replay memory.")
+        if save_memory: 
             print("Now saving replay memory.")
             memory_path = self.replay_memory.save(
                 self.options.checkpoints_dir, "replay_buffer.pt"
             )
-            #self.logger.info(f"Saved replay buffer to {memory_path}.")
             print(f"Saved replay buffer to {memory_path}.")
 
     def save(self, path):
+        # Role: Save model state, parameters and training progress
         with _get_folder_lock(self.folder_lock_path):
             torch.save(
                 {
@@ -1300,6 +1248,7 @@ class DDQNTrainer:
             )
 
     def load(self, path):
+        # Role: Load saved model state and training progress
         checkpoint = torch.load(path)
         self.policy.load_state_dict(checkpoint["dqn_weights"])
         self.episode = checkpoint["episode"] + 1
@@ -1316,7 +1265,7 @@ class DDQNTrainer:
 ###################### Reconstructor Network ######################
 
 
-
+# Role: Returns a normalization layer based on the specified type
 def get_norm_layer(norm_type="instance"):
     if norm_type == "batch":
         norm_layer = functools.partial(nn.BatchNorm2d, affine=True)
@@ -1331,6 +1280,7 @@ def get_norm_layer(norm_type="instance"):
     return norm_layer
 
 
+# Role: Initializes network weights using different initialization methods
 def init_func(m):
     init_type = "normal"
     gain = 0.02
@@ -1357,7 +1307,7 @@ def init_func(m):
         torch.nn.init.constant_(m.bias.data, 0.0)
 
 
-# Define a resnet block
+# Role: Implements a residual block for the neural network
 class ResnetBlock(nn.Module):
     def __init__(self, dim, padding_type, norm_layer, dropout_probability, use_bias):
         super(ResnetBlock, self).__init__()
@@ -1365,6 +1315,7 @@ class ResnetBlock(nn.Module):
             dim, padding_type, norm_layer, dropout_probability, use_bias
         )
 
+    # Role: Builds the convolutional block with specified parameters
     def build_conv_block(
         self, dim, padding_type, norm_layer, dropout_probability, use_bias
     ):
@@ -1403,11 +1354,13 @@ class ResnetBlock(nn.Module):
 
         return nn.Sequential(*conv_block)
 
+    # Role: Forward pass through the residual block
     def forward(self, x):
         out = x + self.conv_block(x)
         return out
 
 
+# Role: Main network for reconstructing MRI images from partial k-space data
 class ReconstructorNetwork(nn.Module):
     """Reconstructor network used in Zhang et al., CVPR'19.
 
@@ -1573,6 +1526,7 @@ class ReconstructorNetwork(nn.Module):
 
         self.apply(init_func)
 
+    # Role: Applies data consistency by combining reconstructed and input data in k-space
     def data_consistency(self, x, input, mask):
         ft_x = fft(x)
         fuse = (
@@ -1583,13 +1537,14 @@ class ReconstructorNetwork(nn.Module):
         )
         return fuse
 
+    # Role: Creates an embedding of the sampling mask
     def embed_mask(self, mask):
         b, c, h, w = mask.shape
         mask = mask.view(b, w, 1, 1)
         cond_embed = self.mask_embedding_layer(mask)
         return cond_embed
 
-    # noinspection PyUnboundLocalVariable
+    # Role: Forward pass through the reconstructor network
     def forward(self, zero_filled_input, mask):
         """Generates reconstructions given images with partial k-space info.
 
@@ -1644,6 +1599,7 @@ class ReconstructorNetwork(nn.Module):
 
         return reconstructed_image, uncertainty_map, mask_embedding
 
+    # Role: Initializes network weights from a checkpoint
     def init_from_checkpoint(self, checkpoint):
 
         if not isinstance(self, nn.DataParallel):
@@ -1662,6 +1618,7 @@ class ReconstructorNetwork(nn.Module):
 
 ###################### Fourier Transform ######################
 
+# Role: Shifts tensor elements along specified dimensions by given amounts
 def roll(x, shift, dim):
     if isinstance(shift, (tuple, list)):
         assert len(shift) == len(dim)
@@ -1676,8 +1633,7 @@ def roll(x, shift, dim):
     return torch.cat((right, left), dim=dim)
 
 
-# note that for IFFT we do not use irfft
-# this function returns two channels where the first one (real part) is in image space
+# Role: Performs inverse FFT shift by moving zero-frequency component to center of spectrum
 def ifftshift(x, dim=None):
     if dim is None:
         dim = tuple(range(x.dim()))
@@ -1689,6 +1645,7 @@ def ifftshift(x, dim=None):
     return roll(x, shift, dim)
 
 
+# Role: Performs FFT shift by moving zero-frequency component to corners of spectrum
 def fftshift(x, dim=None):
     if dim is None:
         dim = tuple(range(x.dim()))
@@ -1700,6 +1657,7 @@ def fftshift(x, dim=None):
     return roll(x, shift, dim)
 
 
+# Role: Performs inverse Fast Fourier Transform on input tensor
 def ifft(x, normalized=False, ifft_shift=False):
     x = x.permute(0, 2, 3, 1)
     #y = torch.ifft(x, 2, normalized=normalized)
@@ -1709,6 +1667,7 @@ def ifft(x, normalized=False, ifft_shift=False):
     return y.permute(0, 3, 1, 2)
 
 
+# Role: Performs real-valued Fast Fourier Transform on input tensor
 def rfft(x, normalized=False):
     # x is in gray scale and has 1-d in the 1st dimension
     x = x.squeeze(1)
@@ -1716,6 +1675,7 @@ def rfft(x, normalized=False):
     return y.permute(0, 3, 1, 2)
 
 
+# Role: Performs Fast Fourier Transform on input tensor
 def fft(x, normalized=False, shift=False):
     x = x.permute(0, 2, 3, 1)
     if shift:
@@ -1726,6 +1686,7 @@ def fft(x, normalized=False, shift=False):
     return y.permute(0, 3, 1, 2)
 
 
+# Role: Crops tensor to specified shape around the center
 def center_crop(x, shape):
     assert 0 < shape[0] <= x.shape[-2]
     assert 0 < shape[1] <= x.shape[-1]
@@ -1737,15 +1698,18 @@ def center_crop(x, shape):
     return x
 
 
+# Role: Converts complex tensor to magnitude by computing sqrt(real^2 + imag^2)
 def to_magnitude(tensor):
     tensor = (tensor[:, 0, :, :] ** 2 + tensor[:, 1, :, :] ** 2) ** 0.5
     return tensor.unsqueeze(1)
 
 
+# Role: Normalizes DICOM image values to [0,1] range by clamping and scaling
 def dicom_to_0_1_range(tensor):
     return (tensor.clamp(-3, 3) + 3) / 6
 
 
+# Role: Computes Gaussian negative log likelihood loss between reconstruction and target
 def gaussian_nll_loss(reconstruction, target, logvar, options):
     reconstruction = to_magnitude(reconstruction)
     target = to_magnitude(target)
@@ -1762,6 +1726,7 @@ def gaussian_nll_loss(reconstruction, target, logvar, options):
     return 0.5 * (one_over_var * l2 + logvar)
 
 
+# Role: Preprocesses input data for reconstruction model by applying masks and Fourier transforms
 def preprocess_inputs(batch, dataroot, device, prev_reconstruction=None):
     mask = batch[0].to(device)
     target = batch[1].to(device)
@@ -1806,6 +1771,7 @@ def preprocess_inputs(batch, dataroot, device, prev_reconstruction=None):
 ###################### k-space Sampling Loss  ######################
 
 class GANLossKspace(nn.Module):
+    # Role: Implements GAN loss function for k-space sampling, supporting both MSE and BCE loss types
     def __init__(
         self,
         use_lsgan=True,
@@ -1828,6 +1794,7 @@ class GANLossKspace(nn.Module):
             self.gamma = gamma
             self.bin = 5
 
+    # Role: Generates target tensors for GAN loss calculation based on whether target should be real or fake
     def get_target_tensor(self, input, target_is_real, degree, mask, pred_and_gt=None):
 
         if target_is_real:
@@ -1859,6 +1826,7 @@ class GANLossKspace(nn.Module):
                 target_tensor[i, idx] = 1
         return target_tensor
 
+    # Role: Calculates the GAN loss between input and target tensors, handling both generator and discriminator updates
     def __call__(
         self, input, target_is_real, mask, degree=1, updateG=False, pred_and_gt=None
     ):
@@ -1885,17 +1853,15 @@ class GANLossKspace(nn.Module):
 
 
 
-
-
-
-
 ###################### Helper Functions ######################
 
+# Role: Calculates epsilon value for epsilon-greedy exploration based on training steps
 def _get_epsilon(steps_done, opts):
     return opts.epsilon_end + (opts.epsilon_start - opts.epsilon_end) * math.exp(
         -1.0 * steps_done / opts.epsilon_decay
     )
 
+# Role: Transforms observation dictionary into tensor format suitable for neural network input
 def _encode_obs_dict(obs: Dict[str, Any]) -> torch.Tensor:
     reconstruction = obs["reconstruction"].permute(0, 3, 1, 2)
     mask_embedding = obs["extra_outputs"]["mask_embedding"]
@@ -1919,7 +1885,7 @@ def _encode_obs_dict(obs: Dict[str, Any]) -> torch.Tensor:
     return transformed_obs
 
 
-
+# Role: Creates appropriate neural network model based on options configuration
 def _get_model(options):
     if options.dqn_model_type == "simple_mlp":
         return SimpleMLP(options.budget, options.image_width)
@@ -1932,6 +1898,7 @@ def _get_model(options):
     raise ValueError("Unknown model specified for DQN.")
 
 
+# Role: Decodes observation tensor back into reconstruction, mask and mask embedding components
 def _decode_obs_tensor(
     obs_tensor: torch.Tensor, mask_embed_dim: int
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
@@ -1951,7 +1918,7 @@ def _decode_obs_tensor(
 
     return reconstruction, mask, mask_embedding
 
-# This is just a wrapper for the model in cvpr19_models folder
+# Role: Wrapper class for CVPR19 evaluator model that implements the Policy interface
 class CVPR19Evaluator(Policy):
     def __init__(
         self,
@@ -1988,6 +1955,7 @@ class CVPR19Evaluator(Policy):
         self.add_mask = add_mask
         self.device = device
 
+    # Role: Selects actions by evaluating k-space scores using the CVPR19 evaluator model
     def get_action(self, obs: Dict[str, Any], **_kwargs) -> List[int]:
         with torch.no_grad():
             mask_embedding = (
@@ -2019,7 +1987,7 @@ if __name__ == "__main__":
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         seed=0,
         extreme_acc=False,
-        checkpoints_dir="/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning//RL_with_k-space_sampling/Save_Training_Checkpoints_yck",
+        checkpoints_dir="/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning//RL_with_k-space_sampling/Save_Training_Checkpoints_yck", #  Where you will save your training checkpoints
         mem_capacity=1000, # 200000
         dqn_model_type="evaluator", # Choices: "simple_mlp", "evaluator"
         reward_metric="ssim", # Choices: "mse", "ssim", "nmse", "psnr"
@@ -2043,6 +2011,7 @@ if __name__ == "__main__":
         debug=False
     )
 
+    # To find correct number of episodes (from article):
     # T = 100 - L (L=30), T=70
     # Number of Episodes= Total Steps / T = 500000 / 70 = 71428
     

@@ -1,14 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates.
-
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-
 from types import SimpleNamespace
 import os
 import sys
 
-#import activemri.baselines.ddqn as ddqn
-#import activemri.envs as envs
 #Add the parent directory of environment_yck to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import environment_yck as envs
@@ -922,23 +915,6 @@ class DDQNTester:
 
         self.options = None
 
-        # Initialize writer and logger
-        '''
-        self.writer = tensorboardX.SummaryWriter(os.path.join(self.evaluation_dir))
-        self.logger = logging.getLogger()
-        self.logger.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "%(asctime)s - %(threadName)s - %(levelname)s: %(message)s"
-        )
-        ch = logging.StreamHandler(sys.stdout)
-        ch.setFormatter(formatter)
-        self.logger.addHandler(ch)
-        ch.setLevel(logging.DEBUG)
-        fh = logging.FileHandler(os.path.join(self.evaluation_dir, "evaluation.log"))
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(formatter)
-        self.logger.addHandler(fh)
-        '''
         # Read the options used for training
         options_file_found = False
         while not options_file_found:
@@ -966,12 +942,6 @@ class DDQNTester:
         print(f"Checkpoint dir for this job is {self.evaluation_dir}")
         print(f"Evaluation will be done for model saved at {self.training_dir}")
         
-        # self.logger.info(f"Created environment with {self.env.action_space.n} actions")
-        # self.logger.info(f"Checkpoint dir for this job is {self.evaluation_dir}")
-        # self.logger.info(
-        #     f"Evaluation will be done for model saved at {self.training_dir}"
-        # )
-
         # Initialize policy
         self.policy = DDQN(device, None, self.options)
 
@@ -1024,7 +994,7 @@ class DDQNTester:
     def check_if_train_done(self):
         with _get_folder_lock(self.folder_lock_path):
             #done_file_path = DDQNTrainer.get_done_filename(self.training_dir)
-            done_file_path= '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck/DONE'
+            done_file_path= '/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/RL_with_k-space_sampling/Save_Training_Checkpoints_yck/DONE'
             return os.path.isfile(done_file_path)
 
     def checkpoint(self):
@@ -1688,18 +1658,17 @@ class CVPR19Evaluator(Policy):
 
 
 
-
-
 if __name__ == "__main__":
     args = SimpleNamespace(
         budget=10,
         num_parallel_episodes=4,
-        training_dir='/home/yck/Desktop/GITHUB/Bayesian Reinforcement Learning/active-mri-acquisition_yck/Save_Training_Checkpoints_yck',
+        training_dir='',
         device=None,
         extreme_acc=False,
         seed=0
     )
 
+    begin_time = time.time()
 
     env = envs.MICCAI2020Env(
         args.num_parallel_episodes,
@@ -1708,8 +1677,13 @@ if __name__ == "__main__":
         seed=args.seed,
     )
     
+    
     tester = DDQNTester(env, args.training_dir, args.device)
     tester()
+
+    end_time = time.time()
+    print(f'Total Time: {end_time - begin_time} seconds')
+    print('Testing Completed!')
 
 
 
